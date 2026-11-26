@@ -462,23 +462,22 @@ public final class TerminalView extends View {
         int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
         if (mTopRow < -rowsInHistory) setTopRow(-rowsInHistory);
 
-        if (isSelectingText() || mEmulator.isAutoScrollDisabled()) {
-            // Do not scroll when selecting text.
+        boolean keepScrollPosition = isSelectingText() || mEmulator.isAutoScrollDisabled() || mTopRow != 0;
+        if (keepScrollPosition) {
+            // Keep viewport pinned when selecting text, auto-scroll is disabled, or user scrolled up.
             int rowShift = mEmulator.getScrollCounter();
             if (-mTopRow + rowShift > rowsInHistory) {
-                // .. unless we're hitting the end of history transcript, in which
-                // case we abort text selection and scroll to end.
+                // Clamp to oldest available history row if transcript overflow drops old lines.
                 if (isSelectingText())
                     stopTextSelectionMode();
 
-                if (mEmulator.isAutoScrollDisabled()) {
-                    setTopRow(-rowsInHistory);
-                    skipScrolling = true;
-                }
+                setTopRow(-rowsInHistory);
+                skipScrolling = true;
             } else {
                 skipScrolling = true;
                 setTopRow(mTopRow - rowShift);
-                decrementYTextSelectionCursors(rowShift);
+                if (isSelectingText())
+                    decrementYTextSelectionCursors(rowShift);
             }
         }
 
@@ -781,6 +780,7 @@ public final class TerminalView extends View {
         } else if (event.isSystem() && (!mClient.shouldBackButtonBeMappedToEscape() || keyCode != KeyEvent.KEYCODE_BACK)) {
             return super.onKeyDown(keyCode, event);
         } else if (event.getAction() == KeyEvent.ACTION_MULTIPLE && keyCode == KeyEvent.KEYCODE_UNKNOWN) {
+            scrollToBottomOnInput();
             mTermSession.write(event.getCharacters());
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_LANGUAGE_SWITCH) {
@@ -905,7 +905,16 @@ public final class TerminalView extends View {
             }
 
             // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
+            scrollToBottomOnInput();
             mTermSession.writeCodePoint(altDown, codePoint);
+        }
+    }
+
+    private void scrollToBottomOnInput() {
+        if (mEmulator != null && !mEmulator.isAutoScrollDisabled() && mTopRow != 0) {
+            if (mTopRow < -3) awakenScrollBars();
+            setTopRow(0);
+            invalidate();
         }
     }
 
@@ -921,6 +930,7 @@ public final class TerminalView extends View {
         TerminalEmulator term = mTermSession.getEmulator();
         String code = KeyHandler.getCode(keyCode, keyMod, term.isCursorKeysApplicationMode(), term.isKeypadApplicationMode());
         if (code == null) return false;
+        scrollToBottomOnInput();
         mTermSession.write(code);
         return true;
     }
